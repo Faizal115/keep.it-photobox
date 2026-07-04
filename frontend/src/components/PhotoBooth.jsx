@@ -19,7 +19,7 @@ export default function PhotoBooth() {
   const [countdown, setCountdown] = useState(0);
   const [isCounting, setIsCounting] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState(null);
-
+  
   const [activeTab, setActiveTab] = useState('effect'); 
   const [selectedFilter, setSelectedFilter] = useState('none'); 
   const [selectedFrame, setSelectedFrame] = useState('theme-polos'); 
@@ -80,7 +80,7 @@ export default function PhotoBooth() {
     loadModels();
   }, []);
 
-  // 3. EFEK TRACKING DETEKSI WAJAH (Posisi cermin aman)
+  // 3. EFEK TRACKING DETEKSI WAJAH
   useEffect(() => {
     let intervalId = null;
 
@@ -144,7 +144,7 @@ export default function PhotoBooth() {
     };
   }, [isLoveFilterActive, modelsLoaded]);
 
-  // EFEK PENGHITUNG WAKTU (Timer 3 Detik)
+  // EFEK PENGHITUNG WAKTU
   useEffect(() => {
     if (countdown > 0) {
       const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
@@ -161,14 +161,19 @@ export default function PhotoBooth() {
     setIsCounting(true);
   };
 
+  // Merekam Foto Instan
   const executeSnap = () => {
-    if (!videoRef.current || videoRef.current.videoWidth === 0) return;
+    if (!videoRef.current || videoRef.current.videoWidth === 0 || !stream) return;
+
+    const videoW = videoRef.current.videoWidth;
+    const videoH = videoRef.current.videoHeight;
 
     const canvas = document.createElement('canvas');
-    canvas.width = videoRef.current.videoWidth;
-    canvas.height = videoRef.current.videoHeight;
+    canvas.width = videoW;
+    canvas.height = videoH;
     const ctx = canvas.getContext('2d');
-    
+
+    // Tentukan filter warna
     let canvasFilter = 'none';
     switch(selectedFilter) {
       case 'bw': canvasFilter = 'grayscale(1) contrast(1.25) brightness(0.9)'; break;
@@ -182,37 +187,38 @@ export default function PhotoBooth() {
       case 'invert': canvasFilter = 'invert(1) contrast(1.25)'; break;
       default: canvasFilter = 'none';
     }
-    ctx.filter = canvasFilter;
 
+    // Gambar frame kamera dengan filter (dan efek cermin)
+    ctx.filter = canvasFilter;
     ctx.translate(canvas.width, 0);
     ctx.scale(-1, 1);
     ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-    
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.filter = 'none'; 
+    ctx.filter = 'none';
 
+    // Tempel Love Head jika aktif
     if (isLoveFilterActive && filterStyle.display === 'block') {
-      const img = new Image();
-      img.src = '/assets/love-head.png'; 
+      const loveImg = new Image();
+      loveImg.src = '/assets/love-head.png';
       
-      const videoElement = videoRef.current;
-      const scaleX = videoElement.videoWidth / videoElement.clientWidth;
-      const scaleY = videoElement.videoHeight / videoElement.clientHeight;
+      const scaleX = videoW / videoRef.current.clientWidth;
+      const scaleY = videoH / videoRef.current.clientHeight;
 
       const drawX = parseFloat(filterStyle.left) * scaleX;
       const drawY = parseFloat(filterStyle.top) * scaleY;
       const drawW = parseFloat(filterStyle.width) * scaleX;
       const drawH = parseFloat(filterStyle.height) * scaleY;
 
-      ctx.drawImage(img, drawX, drawY, drawW, drawH);
+      ctx.drawImage(loveImg, drawX, drawY, drawW, drawH);
     }
 
+    // Ambil hasil gambar
     const photoDataUrl = canvas.toDataURL('image/jpeg', 0.95);
-
+    
     setIsFlash(true);
     setTimeout(() => setIsFlash(false), 150);
 
-    const newPhoto = { filter: 'none', image: photoDataUrl };
+    const newPhoto = { image: photoDataUrl };
 
     if (selectedSlot !== null) {
       const updatedPhotos = [...capturedPhotos];
@@ -239,8 +245,9 @@ export default function PhotoBooth() {
     setCapturedPhotos(updatedPhotos);
   };
 
+  // Unduh Foto Statis Strip
   const handleDownload = async () => {
-    if (!stripRef.current) return;
+    if (!stripRef.current || capturedPhotos.length === 0) return;
     
     const originalClasses = stripRef.current.className;
     stripRef.current.classList.remove('rotate-1', 'hover:rotate-0');
@@ -251,8 +258,7 @@ export default function PhotoBooth() {
         useCORS: true,
         allowTaint: true,
         logging: false,
-        backgroundColor: null,
-        imageTimeout: 0
+        backgroundColor: null
       });
       
       const image = canvas.toDataURL('image/png');
@@ -280,10 +286,10 @@ export default function PhotoBooth() {
     let x, y;
 
     switch(edge) {
-      case 0: x = Math.floor(Math.random() * 80) + 10; y = Math.floor(Math.random() * 6) + 1; break;
-      case 1: x = Math.floor(Math.random() * 80) + 10; y = Math.floor(Math.random() * 6) + 90; break;
-      case 2: x = Math.floor(Math.random() * 6) + 1; y = Math.floor(Math.random() * 70) + 15; break;
-      case 3: x = Math.floor(Math.random() * 6) + 84; y = Math.floor(Math.random() * 70) + 15; break;
+      case 0: x = Math.floor(Math.random() * 80) + 10; y = Math.floor(Math.random() * 5) + 10; break;
+      case 1: x = Math.floor(Math.random() * 80) + 10; y = Math.floor(Math.random() * 5) + 83; break;
+      case 2: x = Math.floor(Math.random() * 6) + 1; y = Math.floor(Math.random() * 73) + 10; break;
+      case 3: x = Math.floor(Math.random() * 6) + 84; y = Math.floor(Math.random() * 73) + 10; break;
       default: x = 50; y = 50;
     }
 
@@ -329,78 +335,29 @@ export default function PhotoBooth() {
   return (
     <div className="min-h-screen bg-[#3e2723] bg-gradient-to-b from-[#4e342e] to-[#2d1b18] flex flex-col lg:flex-row items-center justify-center p-4 lg:p-6 gap-6 font-mono relative select-none overflow-x-hidden pb-12 pt-20">
       
+      {isFlash && (
+        <div className="fixed inset-0 bg-white z-[9999] opacity-80 pointer-events-none transition-opacity duration-150"></div>
+      )}
+
       {/* 🔴 TIANG MERAH KIRI & KANAN (PILLARS) */}
       <div className="fixed top-0 bottom-0 left-0 w-6 md:w-12 bg-gradient-to-r from-[#7f1d1d] to-[#991b1b] border-r-4 border-[#450a0a] shadow-[10px_0_25px_rgba(0,0,0,0.8)] z-30"></div>
       <div className="fixed top-0 bottom-0 right-0 w-6 md:w-12 bg-gradient-to-l from-[#7f1d1d] to-[#991b1b] border-l-4 border-[#450a0a] shadow-[-10px_0_25px_rgba(0,0,0,0.8)] z-30"></div>
 
       {/* 🖼️ BACKGROUND TEXTURE & ICONS */}
       <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
-        {/* Garis-garis diagonal */}
         <div className="absolute inset-0 opacity-15 bg-[repeating-linear-gradient(45deg,#000_0,#000_2px,transparent_2px,transparent_15px)]"></div>
-        
-        {/* Kumpulan Ikon Outline (Sudah Digeser Lebih ke Tengah & Menggunakan Ikon WhatsApp) */}
         <div className="absolute inset-0 text-[#e3d5ca] opacity-40 drop-shadow-sm">
-            {/* --- SISI KIRI (Geser ke Tengah menggunakan left-[12%] s/d left-[16%]) --- */}
-            {/* Kamera - Kiri Atas */}
-            <svg className="absolute top-[12%] left-[13%] w-10 h-10 -rotate-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-              <circle cx="12" cy="13" r="4"/>
-            </svg>
-            
-            {/* Instagram - Kiri Tengah Atas */}
-            <svg className="absolute top-[32%] left-[15%] w-11 h-11 rotate-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="2" y="2" width="20" height="20" rx="5" ry="5"/>
-              <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/>
-              <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/>
-            </svg>
-            
-            {/* WhatsApp - Kiri Tengah */}
-            <svg className="absolute top-[52%] left-[12%] w-10 h-10 -rotate-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
-            </svg>
-            
-            {/* Chat Bubble - Kiri Tengah Bawah */}
-            <svg className="absolute top-[70%] left-[14%] w-10 h-10 rotate-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-            </svg>
-            
-            {/* Image / Gallery - Kiri Bawah */}
-            <svg className="absolute top-[88%] left-[13%] w-12 h-12 -rotate-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-              <circle cx="8.5" cy="8.5" r="1.5"/>
-              <polyline points="21 15 16 10 5 21"/>
-            </svg>
+            <svg className="absolute top-[12%] left-[13%] w-10 h-10 -rotate-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+            <svg className="absolute top-[32%] left-[15%] w-11 h-11 rotate-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>
+            <svg className="absolute top-[52%] left-[12%] w-10 h-10 -rotate-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+            <svg className="absolute top-[70%] left-[14%] w-10 h-10 rotate-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <svg className="absolute top-[88%] left-[13%] w-12 h-12 -rotate-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
 
-            {/* --- SISI KANAN (Geser ke Tengah menggunakan right-[12%] s/d right-[16%]) --- */}
-            {/* Instagram - Kanan Atas */}
-            <svg className="absolute top-[10%] right-[14%] w-11 h-11 rotate-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="2" y="2" width="20" height="20" rx="5" ry="5"/>
-              <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/>
-              <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/>
-            </svg>
-            
-            {/* Chat Bubble - Kanan Tengah Atas */}
-            <svg className="absolute top-[28%] right-[12%] w-10 h-10 -rotate-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-            </svg>
-            
-            {/* WhatsApp - Kanan Tengah */}
-            <svg className="absolute top-[48%] right-[15%] w-10 h-10 rotate-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
-            </svg>
-
-            {/* Kamera - Kanan Tengah Bawah */}
-            <svg className="absolute top-[68%] right-[13%] w-10 h-10 -rotate-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-              <circle cx="12" cy="13" r="4"/>
-            </svg>
-            
-            {/* Image / Gallery - Kanan Bawah */}
-            <svg className="absolute top-[86%] right-[14%] w-12 h-12 rotate-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-              <circle cx="8.5" cy="8.5" r="1.5"/>
-              <polyline points="21 15 16 10 5 21"/>
-            </svg>
+            <svg className="absolute top-[10%] right-[14%] w-11 h-11 rotate-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>
+            <svg className="absolute top-[28%] right-[12%] w-10 h-10 -rotate-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <svg className="absolute top-[48%] right-[15%] w-10 h-10 rotate-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+            <svg className="absolute top-[68%] right-[13%] w-10 h-10 -rotate-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+            <svg className="absolute top-[86%] right-[14%] w-12 h-12 rotate-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
         </div>
       </div>
       
@@ -626,22 +583,26 @@ export default function PhotoBooth() {
               </>
             )}
 
-            <div className={`text-center font-black tracking-widest text-[9px] uppercase border-b pb-0.5 w-full z-10 overflow-hidden whitespace-nowrap text-ellipsis pt-2 rounded backdrop-blur-sm px-1 mt-1 ${selectedFrame === 'theme-cinema' ? 'border-amber-500/20 bg-stone-900/60 text-amber-400' : 'border-current/10 bg-white/20'}`}>
+            <div className={`text-center text-[7px] font-bold opacity-70 mt-auto pt-0.5 w-full border-t z-10 pb-1 mb-1 rounded ${selectedFrame === 'theme-cinema' ? 'border-amber-500/20 bg-stone-900/80' : 'border-current/20 bg-white/50'}`}>
               {customText || "MOMENT STRIP"}
             </div>
 
             <div className={`w-full z-10 relative ${selectedLayout > 4 ? 'grid grid-cols-2 gap-1.5' : 'flex flex-col gap-1.5'}`}>
               {Array.from({ length: selectedLayout }).map((_, index) => (
-                <div key={index} className={`w-full aspect-[4/3] bg-stone-300/80 border flex items-center justify-center overflow-hidden relative shadow-inner rounded-sm group transition-all ${selectedSlot === index ? 'ring-4 ring-amber-500 border-amber-500 scale-95 z-30' : (selectedFrame === 'theme-cinema' ? 'border-amber-600/30' : 'border-current/20')}`}>
+                <div key={index} className={`photo-slot w-full aspect-[4/3] bg-stone-300/80 border flex items-center justify-center overflow-hidden relative shadow-inner rounded-sm group transition-all ${selectedSlot === index ? 'ring-4 ring-amber-500 border-amber-500 scale-95 z-30' : (selectedFrame === 'theme-cinema' ? 'border-amber-600/30' : 'border-current/20')}`}>
                   {capturedPhotos[index] ? (
-                    <>
-                      <img src={capturedPhotos[index].image} alt={`Pose ${index + 1}`} className="w-full h-full object-cover" />
-                      <div className="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-1 transition-all duration-200 z-20">
+                    
+                    <div className="w-full h-full relative group/photo overflow-hidden">
+                      <img src={capturedPhotos[index].image} alt={`Pose ${index + 1}`} className="w-full h-full object-cover absolute inset-0 z-10" />
+                      
+                      {/* UI TOMBOL RETAKE / GESER */}
+                      <div data-html2canvas-ignore="true" className="absolute inset-0 bg-black/70 opacity-0 group-hover/photo:opacity-100 flex items-center justify-center gap-1 transition-all duration-200 z-30">
                         <button onClick={() => setSelectedSlot(index)} className="bg-amber-500 hover:bg-amber-600 text-stone-950 font-black text-[8px] px-1.5 py-0.5 rounded uppercase">Retake</button>
                         <button onClick={() => movePhoto(index, -1)} disabled={index === 0} className="bg-white hover:bg-stone-200 text-stone-900 font-bold text-[9px] w-5 h-5 rounded flex items-center justify-center disabled:opacity-30 disabled:pointer-events-none">▲</button>
                         <button onClick={() => movePhoto(index, 1)} disabled={index === capturedPhotos.length - 1} className="bg-white hover:bg-stone-200 text-stone-900 font-bold text-[9px] w-5 h-5 rounded flex items-center justify-center disabled:opacity-30 disabled:pointer-events-none">▼</button>
                       </div>
-                    </>
+                    </div>
+
                   ) : (
                     <button onClick={() => setSelectedSlot(index)} className={`absolute inset-0 flex flex-col items-center justify-center text-[7px] font-bold tracking-widest transition-colors ${selectedFrame === 'theme-cinema' ? 'text-amber-200/40 bg-stone-900/50 hover:text-amber-300' : 'text-stone-500 bg-stone-200/50 hover:text-stone-800'}`}>
                       <span>KOSONG</span>
@@ -664,9 +625,17 @@ export default function PhotoBooth() {
           </div>
         </div>
 
-        <button onClick={handleDownload} className="mt-4 w-full bg-amber-500 hover:bg-amber-600 text-stone-950 font-black py-2 px-4 rounded-xl border-b-4 border-amber-800 active:border-b-0 active:mt-[18px] transition-all text-[11px] tracking-wider uppercase shadow-md shrink-0">
-          💾 UNDUH FOTO
-        </button>
+        {/* TOMBOL UNDUH */}
+        <div className="mt-4 w-full px-2">
+          <button 
+            onClick={handleDownload} 
+            disabled={capturedPhotos.length === 0}
+            className={`w-full bg-amber-500 hover:bg-amber-600 text-stone-950 font-black py-3 px-4 rounded-xl border-b-4 border-amber-800 active:border-b-0 active:translate-y-1 transition-all text-xs tracking-widest uppercase shadow-md flex items-center justify-center gap-2 ${capturedPhotos.length === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+          >
+            <span>💾</span> SIMPAN FOTO STRIP
+          </button>
+        </div>
+        
       </div>
 
     </div>
