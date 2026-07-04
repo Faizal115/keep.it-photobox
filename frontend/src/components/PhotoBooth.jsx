@@ -10,10 +10,10 @@ export default function PhotoBooth() {
   const [isFlash, setIsFlash] = useState(false);
   const [capturedPhotos, setCapturedPhotos] = useState([]);
   
-  // STATE AI & FILTER LOVE
+  // STATE AI & EFFECT WAJAH MULTI-VARIASI
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [filterStyle, setFilterStyle] = useState({ display: 'none' });
-  const [isLoveFilterActive, setIsLoveFilterActive] = useState(false);
+  const [activeFaceEffect, setActiveFaceEffect] = useState('none'); // 'none', 'love', 'cat', 'glasses'
 
   // STATE MANAJEMEN KONTROL FOTO & TIMER
   const [countdown, setCountdown] = useState(0);
@@ -25,7 +25,7 @@ export default function PhotoBooth() {
   const [selectedFrame, setSelectedFrame] = useState('theme-polos'); 
   const [selectedLayout, setSelectedLayout] = useState(4); 
   const [selectedPaperShape, setSelectedPaperShape] = useState('rounded-none');
-  const [customText, setCustomText] = useState('⭐ KEEP.IT STAMP ⭐'); 
+  const [customText, setCustomText] = useState('⭐ KEEP.IT ⭐'); 
   
   const [stickers, setStickers] = useState([]);
 
@@ -80,12 +80,12 @@ export default function PhotoBooth() {
     loadModels();
   }, []);
 
-  // 3. EFEK TRACKING DETEKSI WAJAH
+  // 3. EFEK TRACKING DETEKSI WAJAH MULTI-VARIASI
   useEffect(() => {
     let intervalId = null;
 
     const trackFace = async () => {
-      if (!videoRef.current || !isLoveFilterActive || !modelsLoaded) {
+      if (!videoRef.current || activeFaceEffect === 'none' || !modelsLoaded) {
         setFilterStyle({ display: 'none' });
         return;
       }
@@ -110,12 +110,35 @@ export default function PhotoBooth() {
           const resizedDetections = faceapi.resizeResults(detections, displaySize);
           const box = resizedDetections[0].detection.box;
 
-          const width = box.width * 1.4; 
-          const height = width * 0.5; 
-          const originalX = box.x - (width - box.width) / 2;
-          const y = box.y - height - (box.height * 0.1); 
+          let width, height, y, originalX;
+
+          // KALIBRASI POSISI BERDASARKAN JENIS EFEK
+          if (activeFaceEffect === 'love') {
+            width = box.width * 1.4; 
+            height = width * 0.5; 
+            originalX = box.x - (width - box.width) / 2;
+            y = box.y - height - (box.height * 0.1); 
+          } 
+          else if (activeFaceEffect === 'cat') {
+            width = box.width * 1.2; 
+            height = width * 0.4; 
+            originalX = box.x - (width - box.width) / 2;
+            y = box.y - height + (box.height * 0.15);
+          }
+          else if (activeFaceEffect === 'glasses') {
+            width = box.width * 1.60; 
+            height = width * 0.35; 
+            originalX = box.x - (width - box.width) / 2;
+            y = box.y + (box.height * 0.05);
+          }
 
           const mirroredX = displaySize.width - originalX - width;
+
+          // Alamat file gambar efek
+          let imgSrc = '';
+          if (activeFaceEffect === 'love') imgSrc = '/assets/love-head.png';
+          if (activeFaceEffect === 'cat') imgSrc = '/assets/cat-ears.png';
+          if (activeFaceEffect === 'glasses') imgSrc = '/assets/glasses.png';
 
           setFilterStyle({
             display: 'block',
@@ -124,6 +147,10 @@ export default function PhotoBooth() {
             top: `${y}px`,
             width: `${width}px`,
             height: `${height}px`,
+            backgroundImage: `url(${imgSrc})`,
+            backgroundSize: 'contain',
+            backgroundRepeat: 'no-repeat',
+            backgroundPosition: 'center',
             zIndex: 30,
             pointerEvents: 'none'
           });
@@ -133,7 +160,7 @@ export default function PhotoBooth() {
       }
     };
 
-    if (isLoveFilterActive && modelsLoaded) {
+    if (activeFaceEffect !== 'none' && modelsLoaded) {
       intervalId = setInterval(trackFace, 100);
     } else {
       setFilterStyle({ display: 'none' });
@@ -142,7 +169,7 @@ export default function PhotoBooth() {
     return () => {
       if (intervalId) clearInterval(intervalId);
     };
-  }, [isLoveFilterActive, modelsLoaded]);
+  }, [activeFaceEffect, modelsLoaded]);
 
   // EFEK PENGHITUNG WAKTU
   useEffect(() => {
@@ -173,7 +200,6 @@ export default function PhotoBooth() {
     canvas.height = videoH;
     const ctx = canvas.getContext('2d');
 
-    // Tentukan filter warna
     let canvasFilter = 'none';
     switch(selectedFilter) {
       case 'bw': canvasFilter = 'grayscale(1) contrast(1.25) brightness(0.9)'; break;
@@ -188,7 +214,6 @@ export default function PhotoBooth() {
       default: canvasFilter = 'none';
     }
 
-    // Gambar frame kamera dengan filter (dan efek cermin)
     ctx.filter = canvasFilter;
     ctx.translate(canvas.width, 0);
     ctx.scale(-1, 1);
@@ -196,10 +221,12 @@ export default function PhotoBooth() {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.filter = 'none';
 
-    // Tempel Love Head jika aktif
-    if (isLoveFilterActive && filterStyle.display === 'block') {
-      const loveImg = new Image();
-      loveImg.src = '/assets/love-head.png';
+    // Tempel Efek Kepala AI yang Aktif ke Canvas Cetak
+    if (activeFaceEffect !== 'none' && filterStyle.display === 'block') {
+      const effectImg = new Image();
+      if (activeFaceEffect === 'love') effectImg.src = '/assets/love-head.png';
+      if (activeFaceEffect === 'cat') effectImg.src = '/assets/cat-ears.png';
+      if (activeFaceEffect === 'glasses') effectImg.src = '/assets/glasses.png';
       
       const scaleX = videoW / videoRef.current.clientWidth;
       const scaleY = videoH / videoRef.current.clientHeight;
@@ -209,10 +236,9 @@ export default function PhotoBooth() {
       const drawW = parseFloat(filterStyle.width) * scaleX;
       const drawH = parseFloat(filterStyle.height) * scaleY;
 
-      ctx.drawImage(loveImg, drawX, drawY, drawW, drawH);
+      ctx.drawImage(effectImg, drawX, drawY, drawW, drawH);
     }
 
-    // Ambil hasil gambar
     const photoDataUrl = canvas.toDataURL('image/jpeg', 0.95);
     
     setIsFlash(true);
@@ -285,11 +311,12 @@ export default function PhotoBooth() {
     const edge = Math.floor(Math.random() * 4);
     let x, y;
 
+    // BATAS VERTIKAL Y AMAN: 10% (di bawah teks judul) sampai 83% (di atas teks tanggal)
     switch(edge) {
-      case 0: x = Math.floor(Math.random() * 80) + 10; y = Math.floor(Math.random() * 5) + 10; break;
-      case 1: x = Math.floor(Math.random() * 80) + 10; y = Math.floor(Math.random() * 5) + 83; break;
-      case 2: x = Math.floor(Math.random() * 6) + 1; y = Math.floor(Math.random() * 73) + 10; break;
-      case 3: x = Math.floor(Math.random() * 6) + 84; y = Math.floor(Math.random() * 73) + 10; break;
+      case 0: x = Math.floor(Math.random() * 80) + 10; y = Math.floor(Math.random() * 5) + 10; break; 
+      case 1: x = Math.floor(Math.random() * 80) + 10; y = Math.floor(Math.random() * 5) + 83; break; 
+      case 2: x = Math.floor(Math.random() * 6) + 1; y = Math.floor(Math.random() * 73) + 10; break;  
+      case 3: x = Math.floor(Math.random() * 6) + 84; y = Math.floor(Math.random() * 73) + 10; break; 
       default: x = 50; y = 50;
     }
 
@@ -339,11 +366,11 @@ export default function PhotoBooth() {
         <div className="fixed inset-0 bg-white z-[9999] opacity-80 pointer-events-none transition-opacity duration-150"></div>
       )}
 
-      {/* 🔴 TIANG MERAH KIRI & KANAN (PILLARS) */}
+      {/* 🔴 TIANG PILLARS */}
       <div className="fixed top-0 bottom-0 left-0 w-6 md:w-12 bg-gradient-to-r from-[#7f1d1d] to-[#991b1b] border-r-4 border-[#450a0a] shadow-[10px_0_25px_rgba(0,0,0,0.8)] z-30"></div>
       <div className="fixed top-0 bottom-0 right-0 w-6 md:w-12 bg-gradient-to-l from-[#7f1d1d] to-[#991b1b] border-l-4 border-[#450a0a] shadow-[-10px_0_25px_rgba(0,0,0,0.8)] z-30"></div>
 
-      {/* 🖼️ BACKGROUND TEXTURE & ICONS */}
+      {/* 🖼️ BACKGROUND ICONS */}
       <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
         <div className="absolute inset-0 opacity-15 bg-[repeating-linear-gradient(45deg,#000_0,#000_2px,transparent_2px,transparent_15px)]"></div>
         <div className="absolute inset-0 text-[#e3d5ca] opacity-40 drop-shadow-sm">
@@ -352,7 +379,6 @@ export default function PhotoBooth() {
             <svg className="absolute top-[52%] left-[12%] w-10 h-10 -rotate-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
             <svg className="absolute top-[70%] left-[14%] w-10 h-10 rotate-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
             <svg className="absolute top-[88%] left-[13%] w-12 h-12 -rotate-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-
             <svg className="absolute top-[10%] right-[14%] w-11 h-11 rotate-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>
             <svg className="absolute top-[28%] right-[12%] w-10 h-10 -rotate-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
             <svg className="absolute top-[48%] right-[15%] w-10 h-10 rotate-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
@@ -361,7 +387,7 @@ export default function PhotoBooth() {
         </div>
       </div>
       
-      {/* 🎪 TENDA MARQUEE + BARISAN LAMPU KUNING KERLIP */}
+      {/* 🎪 TENDA LAMPU KERLIP */}
       <div className="absolute top-0 inset-x-0 h-16 bg-gradient-to-b from-red-800 via-red-900 to-[#3e0c0c] border-b-[6px] border-amber-600/50 shadow-[0_20px_40px_rgba(0,0,0,0.8)] z-40 rounded-b-[40px] flex items-end justify-between px-10 pb-1.5">
         {Array.from({ length: 24 }).map((_, i) => (
           <div 
@@ -373,7 +399,7 @@ export default function PhotoBooth() {
         ))}
       </div>
       
-      {/* 🎫 PAPAN TEKS UTAMA (KEEP.IT STUDIO) */}
+      {/* 🎫 PAPAN TEKS UTAMA */}
       <div className="absolute top-6 inset-x-0 flex justify-center z-50 pointer-events-none">
         <div className="bg-amber-100 px-8 py-2 rounded-full border-4 border-amber-600 shadow-[0_5px_20px_rgba(217,119,6,0.6)] flex items-center gap-4">
           <span className="w-3 h-3 rounded-full bg-red-500 animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.8)]"></span>
@@ -410,12 +436,9 @@ export default function PhotoBooth() {
             className={`w-full h-full object-cover relative z-10 transition-all duration-200 scale-x-[-1] ${getFilterClass(selectedFilter)}`} 
           ></video>
 
-          {isLoveFilterActive && (
-             <img 
-               src="/assets/love-head.png" 
-               alt="Filter Love Head"
-               style={filterStyle} 
-             />
+          {/* MENAMPILKAN LIVE EFFECT WAJAH */}
+          {activeFaceEffect !== 'none' && (
+             <div style={filterStyle}></div>
           )}
         </div>
 
@@ -446,23 +469,39 @@ export default function PhotoBooth() {
           <div className="max-h-[140px] overflow-y-auto overflow-x-hidden flex items-start justify-center p-1">
             
             {activeTab === 'effect' && (
-              <div className="w-full flex items-center justify-center h-full pt-2">
-                <div className="grid grid-cols-2 gap-2 w-3/4">
+              <div className="w-full flex items-center justify-center h-full pt-2 px-2">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 w-full">
                   <button
-                    onClick={() => setIsLoveFilterActive(false)}
-                    className={`py-3 px-2 rounded-lg text-xs font-bold border-2 transition-all ${
-                      !isLoveFilterActive ? 'bg-[#656d4a] text-white border-[#414833] shadow-inner' : 'bg-white border-[#d5bdaf] text-stone-700 hover:bg-stone-100'
+                    onClick={() => setActiveFaceEffect('none')}
+                    className={`py-3 px-1 rounded-lg text-xs font-bold border-2 transition-all ${
+                      activeFaceEffect === 'none' ? 'bg-[#656d4a] text-white border-[#414833] shadow-inner' : 'bg-white border-[#d5bdaf] text-stone-700 hover:bg-stone-100'
                     }`}
                   >
                     🚫 Tanpa Efek
                   </button>
                   <button
-                    onClick={() => setIsLoveFilterActive(true)}
-                    className={`py-3 px-2 rounded-lg text-xs font-bold border-2 transition-all flex items-center justify-center gap-1 ${
-                      isLoveFilterActive ? 'bg-pink-500 text-white border-pink-700 shadow-inner' : 'bg-white border-[#d5bdaf] text-pink-600 hover:bg-pink-50'
+                    onClick={() => setActiveFaceEffect('love')}
+                    className={`py-3 px-1 rounded-lg text-xs font-bold border-2 transition-all flex items-center justify-center gap-1 ${
+                      activeFaceEffect === 'love' ? 'bg-pink-500 text-white border-pink-700 shadow-inner' : 'bg-white border-[#d5bdaf] text-pink-600 hover:bg-pink-50'
                     }`}
                   >
-                    <span>💖</span> Love Head {!modelsLoaded && '(Loading AI...)'}
+                    <span>💖</span> Love Head
+                  </button>
+                  <button
+                    onClick={() => setActiveFaceEffect('cat')}
+                    className={`py-3 px-1 rounded-lg text-xs font-bold border-2 transition-all flex items-center justify-center gap-1 ${
+                      activeFaceEffect === 'cat' ? 'bg-amber-500 text-white border-amber-700 shadow-inner' : 'bg-white border-[#d5bdaf] text-amber-600 hover:bg-amber-50'
+                    }`}
+                  >
+                    <span>🐱</span> Kucing
+                  </button>
+                  <button
+                    onClick={() => setActiveFaceEffect('glasses')}
+                    className={`py-3 px-1 rounded-lg text-xs font-bold border-2 transition-all flex items-center justify-center gap-1 ${
+                      activeFaceEffect === 'glasses' ? 'bg-stone-800 text-white border-stone-950 shadow-inner' : 'bg-white border-[#d5bdaf] text-stone-800 hover:bg-stone-200'
+                    }`}
+                  >
+                    <span>😎</span> Kacamata
                   </button>
                 </div>
               </div>
@@ -583,10 +622,12 @@ export default function PhotoBooth() {
               </>
             )}
 
-            <div className={`text-center text-[7px] font-bold opacity-70 mt-auto pt-0.5 w-full border-t z-10 pb-1 mb-1 rounded ${selectedFrame === 'theme-cinema' ? 'border-amber-500/20 bg-stone-900/80' : 'border-current/20 bg-white/50'}`}>
+            {/* --- TEKS BAGIAN ATAS (SUDAH FIX TER-DOWNLOAD) --- */}
+            <div className={`text-center font-black tracking-widest text-[9px] uppercase border-b pb-0.5 w-full z-10 pt-2 rounded px-1 mt-1 break-words ${selectedFrame === 'theme-cinema' ? 'border-amber-500/20 bg-stone-900/80 text-amber-400' : 'border-current/10 bg-white/50'}`}>
               {customText || "MOMENT STRIP"}
             </div>
 
+            {/* DAFTAR FOTO-FOTO */}
             <div className={`w-full z-10 relative ${selectedLayout > 4 ? 'grid grid-cols-2 gap-1.5' : 'flex flex-col gap-1.5'}`}>
               {Array.from({ length: selectedLayout }).map((_, index) => (
                 <div key={index} className={`photo-slot w-full aspect-[4/3] bg-stone-300/80 border flex items-center justify-center overflow-hidden relative shadow-inner rounded-sm group transition-all ${selectedSlot === index ? 'ring-4 ring-amber-500 border-amber-500 scale-95 z-30' : (selectedFrame === 'theme-cinema' ? 'border-amber-600/30' : 'border-current/20')}`}>
@@ -613,10 +654,12 @@ export default function PhotoBooth() {
               ))}
             </div>
 
-            <div className={`text-center text-[7px] font-bold opacity-70 mt-auto pt-0.5 w-full border-t z-10 pb-1 mb-1 rounded backdrop-blur-sm ${selectedFrame === 'theme-cinema' ? 'border-amber-500/20 bg-stone-900/60' : 'border-current/20 bg-white/20'}`}>
+            {/* --- TANGGAL BAGIAN BAWAH (SUDAH FIX TER-DOWNLOAD) --- */}
+            <div className={`text-center text-[7px] font-bold opacity-70 mt-auto pt-0.5 w-full border-t z-10 pb-1 mb-1 rounded ${selectedFrame === 'theme-cinema' ? 'border-amber-500/20 bg-stone-900/80' : 'border-current/20 bg-white/50'}`}>
               {new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
             </div>
 
+            {/* ELEMEN STIKER YANG MENEMPEL */}
             {stickers.map((sticker) => (
               <div key={sticker.id} onClick={() => handleRemoveSticker(sticker.id)} className="absolute text-xl md:text-2xl cursor-pointer hover:scale-125 transition-transform z-20 drop-shadow-md select-none" style={{ left: `${sticker.x}%`, top: `${sticker.y}%`, transform: `rotate(${sticker.rotation}deg)` }}>
                 {sticker.emoji}
