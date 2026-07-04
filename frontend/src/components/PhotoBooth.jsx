@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
+import * as faceapi from 'face-api.js';
 import html2canvas from 'html2canvas';
 
 export default function PhotoBooth() {
@@ -9,12 +10,17 @@ export default function PhotoBooth() {
   const [isFlash, setIsFlash] = useState(false);
   const [capturedPhotos, setCapturedPhotos] = useState([]);
   
-  // FITUR BARU: State Manajemen Kontrol Foto & Timer
+  // STATE AI & FILTER LOVE
+  const [modelsLoaded, setModelsLoaded] = useState(false);
+  const [filterStyle, setFilterStyle] = useState({ display: 'none' });
+  const [isLoveFilterActive, setIsLoveFilterActive] = useState(false);
+
+  // STATE MANAJEMEN KONTROL FOTO & TIMER
   const [countdown, setCountdown] = useState(0);
   const [isCounting, setIsCounting] = useState(false);
-  const [selectedSlot, setSelectedSlot] = useState(null); // Menyimpan indeks foto yang mau di-retake
+  const [selectedSlot, setSelectedSlot] = useState(null);
 
-  const [activeTab, setActiveTab] = useState('frame'); 
+  const [activeTab, setActiveTab] = useState('effect'); 
   const [selectedFilter, setSelectedFilter] = useState('none'); 
   const [selectedFrame, setSelectedFrame] = useState('theme-polos'); 
   const [selectedLayout, setSelectedLayout] = useState(4); 
@@ -31,10 +37,13 @@ export default function PhotoBooth() {
     '🍀', '🍄', '🌙', '☁️', '🚀', '🛸', '🎨', '🎲'
   ];
 
+  // 1. MEMULAI KAMERA
   useEffect(() => {
     const startCamera = async () => {
       try {
-        const mediaStream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 } });
+        const mediaStream = await navigator.mediaDevices.getUserMedia({ 
+          video: { width: 1280, height: 720 } 
+        });
         setStream(mediaStream);
         if (videoRef.current) {
           videoRef.current.srcObject = mediaStream;
@@ -53,7 +62,89 @@ export default function PhotoBooth() {
     };
   }, []);
 
-  // FITUR BARU: Efek Penghitung Waktu (Timer Otomatis 3 Detik)
+  // 2. LOAD AI MODELS
+  useEffect(() => {
+    const loadModels = async () => {
+      try {
+        const MODEL_URL = '/models';
+        await Promise.all([
+          faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+          faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+        ]);
+        setModelsLoaded(true);
+        console.log("AI Models loaded successfully!");
+      } catch (err) {
+        console.error("Gagal memuat model Face API:", err);
+      }
+    };
+    loadModels();
+  }, []);
+
+  // 3. EFEK TRACKING DETEKSI WAJAH (Posisi cermin aman)
+  useEffect(() => {
+    let intervalId = null;
+
+    const trackFace = async () => {
+      if (!videoRef.current || !isLoveFilterActive || !modelsLoaded) {
+        setFilterStyle({ display: 'none' });
+        return;
+      }
+
+      if (videoRef.current.readyState === 4) {
+        try {
+          const detections = await faceapi.detectAllFaces(
+            videoRef.current, 
+            new faceapi.TinyFaceDetectorOptions()
+          ).withFaceLandmarks();
+
+          if (detections.length === 0) {
+            setFilterStyle({ display: 'none' });
+            return;
+          }
+
+          const displaySize = {
+            width: videoRef.current.clientWidth,
+            height: videoRef.current.clientHeight
+          };
+          
+          const resizedDetections = faceapi.resizeResults(detections, displaySize);
+          const box = resizedDetections[0].detection.box;
+
+          const width = box.width * 1.4; 
+          const height = width * 0.5; 
+          const originalX = box.x - (width - box.width) / 2;
+          const y = box.y - height - (box.height * 0.1); 
+
+          const mirroredX = displaySize.width - originalX - width;
+
+          setFilterStyle({
+            display: 'block',
+            position: 'absolute',
+            left: `${mirroredX}px`,
+            top: `${y}px`,
+            width: `${width}px`,
+            height: `${height}px`,
+            zIndex: 30,
+            pointerEvents: 'none'
+          });
+        } catch (error) {
+          console.error("Error saat tracking wajah:", error);
+        }
+      }
+    };
+
+    if (isLoveFilterActive && modelsLoaded) {
+      intervalId = setInterval(trackFace, 100);
+    } else {
+      setFilterStyle({ display: 'none' });
+    }
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [isLoveFilterActive, modelsLoaded]);
+
+  // EFEK PENGHITUNG WAKTU (Timer 3 Detik)
   useEffect(() => {
     if (countdown > 0) {
       const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
@@ -64,14 +155,12 @@ export default function PhotoBooth() {
     }
   }, [countdown, isCounting]);
 
-  // Handler Tombol Kamera Utama (Memicu Timer)
   const takeSnap = () => {
     if (isCounting) return;
-    setCountdown(3); // Set waktu timer 3 detik di sini
+    setCountdown(3); 
     setIsCounting(true);
   };
 
-  // Fungsi Eksekusi Ambil Gambar Asli Anda (Dipanggil setelah timer habis)
   const executeSnap = () => {
     if (!videoRef.current || videoRef.current.videoWidth === 0) return;
 
@@ -80,11 +169,6 @@ export default function PhotoBooth() {
     canvas.height = videoRef.current.videoHeight;
     const ctx = canvas.getContext('2d');
     
-    // Mirroring
-    ctx.translate(canvas.width, 0);
-    ctx.scale(-1, 1);
-
-    // Terapkan filter langsung ke Canvas Context sebelum menggambar
     let canvasFilter = 'none';
     switch(selectedFilter) {
       case 'bw': canvasFilter = 'grayscale(1) contrast(1.25) brightness(0.9)'; break;
@@ -100,7 +184,29 @@ export default function PhotoBooth() {
     }
     ctx.filter = canvasFilter;
 
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
     ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+    
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.filter = 'none'; 
+
+    if (isLoveFilterActive && filterStyle.display === 'block') {
+      const img = new Image();
+      img.src = '/assets/love-head.png'; 
+      
+      const videoElement = videoRef.current;
+      const scaleX = videoElement.videoWidth / videoElement.clientWidth;
+      const scaleY = videoElement.videoHeight / videoElement.clientHeight;
+
+      const drawX = parseFloat(filterStyle.left) * scaleX;
+      const drawY = parseFloat(filterStyle.top) * scaleY;
+      const drawW = parseFloat(filterStyle.width) * scaleX;
+      const drawH = parseFloat(filterStyle.height) * scaleY;
+
+      ctx.drawImage(img, drawX, drawY, drawW, drawH);
+    }
+
     const photoDataUrl = canvas.toDataURL('image/jpeg', 0.95);
 
     setIsFlash(true);
@@ -108,12 +214,11 @@ export default function PhotoBooth() {
 
     const newPhoto = { filter: 'none', image: photoDataUrl };
 
-    // FITUR BARU: Logika Menyisipkan Foto Baru atau Mengganti (Retake) Foto Spesifik
     if (selectedSlot !== null) {
       const updatedPhotos = [...capturedPhotos];
       updatedPhotos[selectedSlot] = newPhoto;
       setCapturedPhotos(updatedPhotos);
-      setSelectedSlot(null); // Reset slot kembali normal setelah selesai retake
+      setSelectedSlot(null); 
     } else {
       if (capturedPhotos.length < selectedLayout) {
         setCapturedPhotos([...capturedPhotos, newPhoto]); 
@@ -123,7 +228,6 @@ export default function PhotoBooth() {
     }
   };
 
-  // FITUR BARU: Mengubah Letak/Posisi Urutan Foto (Ke atas / Ke bawah)
   const movePhoto = (index, direction) => {
     const targetIndex = index + direction;
     if (targetIndex < 0 || targetIndex >= capturedPhotos.length) return;
@@ -218,83 +322,108 @@ export default function PhotoBooth() {
       case 'theme-holo': return 'bg-gradient-to-tr from-[#a18cd1] via-[#fbc2eb] to-[#8fd3f4] text-purple-900 border-white/70 shadow-[inset_0_0_20px_rgba(255,255,255,0.8)]';
       case 'theme-floral': return 'bg-[#e9f5db] bg-[radial-gradient(#cfe1b9_2px,transparent_2px)] bg-[size:14px_14px] text-[#718355] border-[#8a9a5b]';
       case 'theme-cinema': return 'bg-stone-950 text-amber-100 border-stone-900 px-7 overflow-hidden'; 
-      
       default: return 'bg-white text-stone-800 border-stone-200'; 
     }
   };
 
   return (
-    <div className="min-h-screen bg-[#3e2723] bg-gradient-to-b from-[#4e342e] to-[#2d1b18] flex flex-col lg:flex-row items-center justify-center p-4 lg:p-6 gap-6 font-mono relative select-none overflow-x-hidden pb-12">
+    <div className="min-h-screen bg-[#3e2723] bg-gradient-to-b from-[#4e342e] to-[#2d1b18] flex flex-col lg:flex-row items-center justify-center p-4 lg:p-6 gap-6 font-mono relative select-none overflow-x-hidden pb-12 pt-20">
       
-      <div className="absolute inset-0 opacity-10 pointer-events-none bg-[repeating-linear-gradient(45deg,#000_0,#000_2px,transparent_2px,transparent_15px)] z-0"></div>
-      <div className="absolute top-0 inset-x-0 h-16 bg-gradient-to-b from-red-800 via-red-900 to-[#3e0c0c] border-b-[6px] border-amber-600/50 shadow-[0_20px_40px_rgba(0,0,0,0.8)] z-30 rounded-b-[40px]"></div>
+      {/* 🔴 TIANG MERAH KIRI & KANAN (PILLARS) */}
+      <div className="fixed top-0 bottom-0 left-0 w-6 md:w-12 bg-gradient-to-r from-[#7f1d1d] to-[#991b1b] border-r-4 border-[#450a0a] shadow-[10px_0_25px_rgba(0,0,0,0.8)] z-30"></div>
+      <div className="fixed top-0 bottom-0 right-0 w-6 md:w-12 bg-gradient-to-l from-[#7f1d1d] to-[#991b1b] border-l-4 border-[#450a0a] shadow-[-10px_0_25px_rgba(0,0,0,0.8)] z-30"></div>
+
+      {/* 🖼️ BACKGROUND TEXTURE & ICONS */}
+      <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
+        {/* Garis-garis diagonal */}
+        <div className="absolute inset-0 opacity-15 bg-[repeating-linear-gradient(45deg,#000_0,#000_2px,transparent_2px,transparent_15px)]"></div>
+        
+        {/* Kumpulan Ikon Outline (Sudah Digeser Lebih ke Tengah & Menggunakan Ikon WhatsApp) */}
+        <div className="absolute inset-0 text-[#e3d5ca] opacity-40 drop-shadow-sm">
+            {/* --- SISI KIRI (Geser ke Tengah menggunakan left-[12%] s/d left-[16%]) --- */}
+            {/* Kamera - Kiri Atas */}
+            <svg className="absolute top-[12%] left-[13%] w-10 h-10 -rotate-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+              <circle cx="12" cy="13" r="4"/>
+            </svg>
+            
+            {/* Instagram - Kiri Tengah Atas */}
+            <svg className="absolute top-[32%] left-[15%] w-11 h-11 rotate-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="2" width="20" height="20" rx="5" ry="5"/>
+              <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/>
+              <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/>
+            </svg>
+            
+            {/* WhatsApp - Kiri Tengah */}
+            <svg className="absolute top-[52%] left-[12%] w-10 h-10 -rotate-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+            </svg>
+            
+            {/* Chat Bubble - Kiri Tengah Bawah */}
+            <svg className="absolute top-[70%] left-[14%] w-10 h-10 rotate-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>
+            
+            {/* Image / Gallery - Kiri Bawah */}
+            <svg className="absolute top-[88%] left-[13%] w-12 h-12 -rotate-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+              <circle cx="8.5" cy="8.5" r="1.5"/>
+              <polyline points="21 15 16 10 5 21"/>
+            </svg>
+
+            {/* --- SISI KANAN (Geser ke Tengah menggunakan right-[12%] s/d right-[16%]) --- */}
+            {/* Instagram - Kanan Atas */}
+            <svg className="absolute top-[10%] right-[14%] w-11 h-11 rotate-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="2" width="20" height="20" rx="5" ry="5"/>
+              <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/>
+              <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/>
+            </svg>
+            
+            {/* Chat Bubble - Kanan Tengah Atas */}
+            <svg className="absolute top-[28%] right-[12%] w-10 h-10 -rotate-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>
+            
+            {/* WhatsApp - Kanan Tengah */}
+            <svg className="absolute top-[48%] right-[15%] w-10 h-10 rotate-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+            </svg>
+
+            {/* Kamera - Kanan Tengah Bawah */}
+            <svg className="absolute top-[68%] right-[13%] w-10 h-10 -rotate-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+              <circle cx="12" cy="13" r="4"/>
+            </svg>
+            
+            {/* Image / Gallery - Kanan Bawah */}
+            <svg className="absolute top-[86%] right-[14%] w-12 h-12 rotate-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+              <circle cx="8.5" cy="8.5" r="1.5"/>
+              <polyline points="21 15 16 10 5 21"/>
+            </svg>
+        </div>
+      </div>
       
-      <div className="absolute top-6 inset-x-0 flex justify-center z-40 pointer-events-none">
+      {/* 🎪 TENDA MARQUEE + BARISAN LAMPU KUNING KERLIP */}
+      <div className="absolute top-0 inset-x-0 h-16 bg-gradient-to-b from-red-800 via-red-900 to-[#3e0c0c] border-b-[6px] border-amber-600/50 shadow-[0_20px_40px_rgba(0,0,0,0.8)] z-40 rounded-b-[40px] flex items-end justify-between px-10 pb-1.5">
+        {Array.from({ length: 24 }).map((_, i) => (
+          <div 
+            key={i} 
+            className={`w-2 h-2 rounded-full bg-yellow-300 shadow-[0_0_10px_#fde047,0_0_4px_#ca8a04] ${
+              i % 2 === 0 ? 'animate-pulse' : 'animate-[pulse_1s_infinite_500ms]'
+            }`}
+          ></div>
+        ))}
+      </div>
+      
+      {/* 🎫 PAPAN TEKS UTAMA (KEEP.IT STUDIO) */}
+      <div className="absolute top-6 inset-x-0 flex justify-center z-50 pointer-events-none">
         <div className="bg-amber-100 px-8 py-2 rounded-full border-4 border-amber-600 shadow-[0_5px_20px_rgba(217,119,6,0.6)] flex items-center gap-4">
           <span className="w-3 h-3 rounded-full bg-red-500 animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.8)]"></span>
           <h2 className="text-amber-900 font-black tracking-widest text-sm lg:text-base uppercase">📷 Keep.it Studio 📷</h2>
           <span className="w-3 h-3 rounded-full bg-red-500 animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.8)]"></span>
         </div>
       </div>
-
-      <div className="absolute top-0 left-0 bottom-0 w-8 lg:w-16 bg-gradient-to-r from-[#2a0808] via-red-900 to-red-800 border-r-4 border-amber-600/30 shadow-[15px_0_30px_rgba(0,0,0,0.7)] z-10"></div>
-      <div className="absolute top-0 right-0 bottom-0 w-8 lg:w-16 bg-gradient-to-l from-[#2a0808] via-red-900 to-red-800 border-l-4 border-amber-600/30 shadow-[-15px_0_30px_rgba(0,0,0,0.7)] z-10"></div>
-
-      {/* ========================================================================= */}
-      {/* HIASAN DEKORASI: BRAND SOSMED & KAMERA (TRANSPARAN SEUTUHNYA & STATIS)    */}
-      {/* ========================================================================= */}
-      
-      {/* Kolom Dekorasi Sisi Kiri (Format Zig-Zag agak menjorok ke tengah) */}
-      <div className="hidden xl:flex fixed left-[11%] top-28 bottom-12 w-36 flex-col items-start justify-around z-10 pointer-events-none text-white/10 select-none">
-        {/* Ikon Kamera Klasik */}
-        <div className="pl-16 rotate-6">
-          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>
-        </div>
-        {/* Ikon Instagram Murni Transparan */}
-        <div className="pl-6 -rotate-12">
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="20" x="2" y="2" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/></svg>
-        </div>
-        {/* Ikon Camcorder */}
-        <div className="pl-20 rotate-12">
-          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
-        </div>
-        {/* Ikon WhatsApp/Chat Murni Transparan */}
-        <div className="pl-8 rotate-0">
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
-        </div>
-        {/* Ikon Image Box */}
-        <div className="pl-14 -rotate-6">
-          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
-        </div>
-      </div>
-
-      {/* Kolom Dekorasi Sisi Kanan (Format Zig-Zag agak menjorok ke tengah) */}
-      <div className="hidden xl:flex fixed right-[11%] top-28 bottom-12 w-36 flex-col items-end justify-around z-10 pointer-events-none text-white/10 select-none">
-        {/* Ikon Instagram Murni Transparan */}
-        <div className="pr-16 -rotate-6">
-          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="20" x="2" y="2" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" x2="17.51" y1="6.5" y2="6.5"/></svg>
-        </div>
-        {/* Ikon WhatsApp/Chat Murni Transparan */}
-        <div className="pr-6 rotate-12">
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
-        </div>
-        {/* Ikon Lensa/Aperture */}
-        <div className="pr-20 -rotate-12">
-          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="m12 2-6.5 9h13Z"/><path d="M12 22s5-4.85 5-9H7c0 4.15 5 9 5 9Z"/></svg>
-        </div>
-        {/* Ikon Kamera */}
-        <div className="pr-8 rotate-6">
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg>
-        </div>
-        {/* Ikon Image Box */}
-        <div className="pr-14 rotate-0">
-          <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
-        </div>
-      </div>
-
-      {/* ========================================================================= */}
-
-      {isFlash && <div className="absolute inset-0 bg-white z-50 animate-fade-out pointer-events-none"></div>}
 
       <div className="w-full max-w-xl bg-[#f5ebe0] rounded-3xl p-4 lg:p-5 border-8 border-[#d5bdaf] shadow-[0_25px_50px_-12px_rgba(0,0,0,0.8)] text-stone-800 relative z-20 mt-10 lg:mt-6">
         
@@ -308,20 +437,36 @@ export default function PhotoBooth() {
           <h1 className="text-base font-black tracking-widest text-[#656d4a] bg-[#e3d5ca] px-3 py-0.5 rounded-lg border border-[#d5bdaf]">✨ PHOTO-BOX ✨</h1>
         </div>
 
-        {/* FITUR BARU: Overlay Animasi Angka Hitung Mundur (Timer) */}
+        {/* BOX CONTAINER KAMERA LIVE */}
         <div className="relative aspect-[4/3] w-full max-h-[40vh] mx-auto overflow-hidden bg-neutral-900 border-4 border-[#e3d5ca] shadow-[inset_0_4px_10px_rgba(0,0,0,0.8)] rounded-xl">
           {countdown > 0 && (
             <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-30 select-none pointer-events-none">
               <span className="text-7xl font-black text-amber-400 animate-bounce tracking-tighter">{countdown}</span>
             </div>
           )}
-          <div className="absolute inset-0 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.15)_50%),linear-gradient(90deg,rgba(255,0,0,0.03),rgba(0,255,0,0.01),rgba(0,0,255,0.03))] bg-[length:100%_4px,3px_100%] shadow-[inset_0_0_40px_rgba(0,0,0,0.9)] z-20 pointer-events-none"></div>
-          <video ref={videoRef} autoPlay playsInline className={`w-full h-full object-cover relative z-10 transition-all duration-200 ${getFilterClass(selectedFilter)}`} style={{ transform: 'scaleX(-1)' }}></video>
+          
+          <video 
+            ref={videoRef} 
+            autoPlay 
+            playsInline 
+            muted 
+            className={`w-full h-full object-cover relative z-10 transition-all duration-200 scale-x-[-1] ${getFilterClass(selectedFilter)}`} 
+          ></video>
+
+          {isLoveFilterActive && (
+             <img 
+               src="/assets/love-head.png" 
+               alt="Filter Love Head"
+               style={filterStyle} 
+             />
+          )}
         </div>
 
         <div className="mt-3 bg-[#edede9] p-2 rounded-xl border-2 border-[#d5bdaf] flex flex-col gap-2">
+          
           <div className="flex flex-wrap gap-1 border-b-2 border-[#d5bdaf] pb-2 justify-center">
             {[
+              { id: 'effect', label: '🪄 Efek' }, 
               { id: 'frame', label: '🖼️ Tema' },
               { id: 'shape', label: '✂️ Bentuk' }, 
               { id: 'filter', label: '🎨 Filter' },
@@ -341,20 +486,39 @@ export default function PhotoBooth() {
             ))}
           </div>
 
-          <div className="max-h-[140px] overflow-y-auto overflow-x-hidden flex items-start justify-center p-1 scrollbar-hide">
+          <div className="max-h-[140px] overflow-y-auto overflow-x-hidden flex items-start justify-center p-1">
+            
+            {activeTab === 'effect' && (
+              <div className="w-full flex items-center justify-center h-full pt-2">
+                <div className="grid grid-cols-2 gap-2 w-3/4">
+                  <button
+                    onClick={() => setIsLoveFilterActive(false)}
+                    className={`py-3 px-2 rounded-lg text-xs font-bold border-2 transition-all ${
+                      !isLoveFilterActive ? 'bg-[#656d4a] text-white border-[#414833] shadow-inner' : 'bg-white border-[#d5bdaf] text-stone-700 hover:bg-stone-100'
+                    }`}
+                  >
+                    🚫 Tanpa Efek
+                  </button>
+                  <button
+                    onClick={() => setIsLoveFilterActive(true)}
+                    className={`py-3 px-2 rounded-lg text-xs font-bold border-2 transition-all flex items-center justify-center gap-1 ${
+                      isLoveFilterActive ? 'bg-pink-500 text-white border-pink-700 shadow-inner' : 'bg-white border-[#d5bdaf] text-pink-600 hover:bg-pink-50'
+                    }`}
+                  >
+                    <span>💖</span> Love Head {!modelsLoaded && '(Loading AI...)'}
+                  </button>
+                </div>
+              </div>
+            )}
+
             {activeTab === 'frame' && (
               <div className="w-full grid grid-cols-2 sm:grid-cols-5 gap-1.5">
                 {[
-                  { id: 'theme-polos', name: 'Putih Polos' }, 
-                  { id: 'theme-grid', name: 'Jurnal Grid' }, 
-                  { id: 'theme-polka', name: 'Polkadot' }, 
-                  { id: 'theme-y2k', name: 'Y2K Aura' }, 
-                  { id: 'theme-vintage', name: 'Kertas Usang' }, 
-                  { id: 'theme-blueprint', name: 'Blue Print' },
-                  { id: 'theme-neon', name: 'Neon Dark' },
-                  { id: 'theme-notebook', name: 'Buku Tulis' }, 
-                  { id: 'theme-holo', name: 'Hologram' }, 
-                  { id: 'theme-floral', name: 'Floral' },
+                  { id: 'theme-polos', name: 'Putih Polos' }, { id: 'theme-grid', name: 'Jurnal Grid' }, 
+                  { id: 'theme-polka', name: 'Polkadot' }, { id: 'theme-y2k', name: 'Y2K Aura' }, 
+                  { id: 'theme-vintage', name: 'Kertas Usang' }, { id: 'theme-blueprint', name: 'Blue Print' },
+                  { id: 'theme-neon', name: 'Neon Dark' }, { id: 'theme-notebook', name: 'Buku Tulis' }, 
+                  { id: 'theme-holo', name: 'Hologram' }, { id: 'theme-floral', name: 'Floral' },
                   { id: 'theme-cinema', name: 'Roll Bioskop' }
                 ].map((fr) => (
                   <button key={fr.id} onClick={() => setSelectedFrame(fr.id)} className={`py-2 px-1 rounded-lg text-[9px] sm:text-[10px] font-bold border-2 ${selectedFrame === fr.id ? 'bg-[#656d4a] text-white border-[#414833]' : 'bg-white border-[#d5bdaf] text-stone-700'}`}>
@@ -367,16 +531,13 @@ export default function PhotoBooth() {
             {activeTab === 'shape' && (
               <div className="w-full grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                 {[
-                  { id: 'rounded-none', name: 'Klasik Kotak' }, 
-                  { id: 'rounded-2xl', name: 'Sudut Lembut' },
-                  { id: 'rounded-[45px]', name: 'Kapsul Modern' },
-                  { id: 'rounded-[40px] rounded-br-none', name: 'Chat Bubble' },
+                  { id: 'rounded-none', name: 'Klasik Kotak' }, { id: 'rounded-2xl', name: 'Sudut Lembut' },
+                  { id: 'rounded-[45px]', name: 'Kapsul Modern' }, { id: 'rounded-[40px] rounded-br-none', name: 'Chat Bubble' },
                   { id: 'rounded-tr-[40px] rounded-bl-[40px] rounded-tl-sm rounded-br-sm', name: 'Tiket Retro' },
-                  { id: 'rounded-t-[50px] rounded-b-md', name: 'Kubah' },
-                  { id: 'rounded-tl-[50px] rounded-br-[50px] rounded-tr-md rounded-bl-md', name: 'Bentuk Daun' },
+                  { id: 'rounded-t-[50px] rounded-b-md', name: 'Kubah' }, { id: 'rounded-tl-[50px] rounded-br-[50px] rounded-tr-md rounded-bl-md', name: 'Bentuk Daun' },
                   { id: 'rounded-b-[50px] rounded-t-md', name: 'Pita Bawah' }
                 ].map((sh) => (
-                  <button key={sh.id} onClick={() => setSelectedPaperShape(sh.id)} className={`py-2 px-1 rounded-lg text-[9px] sm:text-[10px] font-bold border-2 text-center flex items-center justify-center ${selectedPaperShape === sh.id ? 'bg-[#656d4a] text-white border-[#414833]' : 'bg-white border-[#d5bdaf] text-stone-700'}`}>
+                  <button key={sh.id} onClick={() => setSelectedPaperShape(sh.id)} className={`py-2 px-1 rounded-lg text-[9px] sm:text-[10px] font-bold border-2 ${selectedPaperShape === sh.id ? 'bg-[#656d4a] text-white border-[#414833]' : 'bg-white border-[#d5bdaf] text-stone-700'}`}>
                     {sh.name}
                   </button>
                 ))}
@@ -428,7 +589,6 @@ export default function PhotoBooth() {
 
             {activeTab === 'text' && (
               <div className="w-full flex flex-col gap-2 items-center justify-center h-full pt-4">
-                <span className="text-[9px] text-stone-500 font-bold">Ubah teks di bagian atas kertas foto Anda!</span>
                 <input 
                   type="text" 
                   maxLength={22}
@@ -443,104 +603,47 @@ export default function PhotoBooth() {
         </div>
 
         <div className="mt-3 flex gap-2">
-          {/* FITUR BARU: Tombol pembatalan mode retake/edit slot */}
           {selectedSlot !== null && (
-            <button 
-              onClick={() => setSelectedSlot(null)}
-              className="bg-stone-500 hover:bg-stone-600 text-white text-[10px] font-black px-3 rounded-xl transition-all uppercase shadow-md border-b-4 border-stone-700 active:border-b-0"
-            >
+            <button onClick={() => setSelectedSlot(null)} className="bg-stone-500 hover:bg-stone-600 text-white text-[10px] font-black px-3 rounded-xl border-b-4 border-stone-700 active:border-b-0">
               Batal Edit
             </button>
           )}
           <button onClick={takeSnap} className="flex-1 bg-gradient-to-b from-red-500 to-red-700 hover:from-red-600 hover:to-red-800 text-white font-black py-3 px-4 rounded-xl border-b-4 border-red-900 active:border-b-0 active:mt-1 transition-all shadow-md tracking-wider text-xs uppercase">
-            {selectedSlot !== null ? `🔄 AMBIL ULANG FOTO SLOT ${selectedSlot + 1} (3s) 📸` : `📸 AMBIL FOTO (TIMER 3s) [${capturedPhotos.length}/${selectedLayout}] 📸`}
+            {selectedSlot !== null ? `🔄 AMBIL ULANG SLOT ${selectedSlot + 1} 📸` : `📸 AMBIL FOTO (TIMER 3s) [${capturedPhotos.length}/${selectedLayout}] 📸`}
           </button>
         </div>
       </div>
 
+      {/* STRIP HASIL CETAK */}
       <div className="flex flex-col items-center z-20 max-h-full mt-10 lg:mt-6 pb-6 w-full lg:w-auto">
-        <span className="text-[10px] font-black text-amber-200/80 mb-1 tracking-widest uppercase bg-black/40 px-3 py-1 rounded-full">
-          Hasil Strip Cetak
-        </span>
-        
-        <div className="max-h-[75vh] w-full lg:w-auto overflow-y-auto overflow-x-hidden [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] py-4 px-6 flex justify-center">
-          
+        <div className="max-h-[75vh] w-full lg:w-auto overflow-y-auto py-4 px-6 flex justify-center">
           <div ref={stripRef} className={`p-2.5 shadow-[5px_15px_30px_rgba(0,0,0,0.6)] flex flex-col gap-1.5 items-center transform rotate-1 hover:rotate-0 transition-all duration-300 relative border-2 ${getThemeClass()} ${selectedPaperShape} ${selectedLayout > 4 ? 'w-64' : 'w-44'}`}>
             
-            {/* LOGIKA BARU: Lubang Roll Film Guntingan Sisi Kiri & Kanan (Hanya aktif di tema cinema) */}
             {selectedFrame === 'theme-cinema' && (
               <>
-                {/* Lubang Sisi Kiri */}
-                <div 
-                    className="absolute left-1.5 top-4 bottom-4 w-3 z-20 pointer-events-none opacity-90"
-                    style={{
-                    backgroundImage: 'linear-gradient(to bottom, #1c1917 0px, #1c1917 6px, transparent 6px, transparent 12px)',
-                    backgroundSize: '100% 12px'
-                }}
-            />
-                {/* Lubang Sisi Kanan */}
-                <div 
-                className="absolute right-1.5 top-4 bottom-4 w-3 z-20 pointer-events-none opacity-90"
-                style={{
-                backgroundImage: 'linear-gradient(to bottom, #1c1917 0px, #1c1917 6px, transparent 6px, transparent 12px)',
-                backgroundSize: '100% 12px'
-                }}
-            />
+                <div className="absolute left-1.5 top-4 bottom-4 w-3 z-20 opacity-90" style={{ backgroundImage: 'linear-gradient(to bottom, #1c1917 0px, #1c1917 6px, transparent 6px, transparent 12px)', backgroundSize: '100% 12px' }} />
+                <div className="absolute right-1.5 top-4 bottom-4 w-3 z-20 opacity-90" style={{ backgroundImage: 'linear-gradient(to bottom, #1c1917 0px, #1c1917 6px, transparent 6px, transparent 12px)', backgroundSize: '100% 12px' }} />
               </>
             )}
 
-            <div className={`text-center font-black tracking-widest text-[9px] uppercase border-b pb-0.5 w-full z-10 relative overflow-hidden whitespace-nowrap text-ellipsis pt-2 rounded backdrop-blur-sm px-1 mt-1 ${selectedFrame === 'theme-cinema' ? 'border-amber-500/20 bg-stone-900/60 text-amber-400' : 'border-current/10 bg-white/20'}`}>
+            <div className={`text-center font-black tracking-widest text-[9px] uppercase border-b pb-0.5 w-full z-10 overflow-hidden whitespace-nowrap text-ellipsis pt-2 rounded backdrop-blur-sm px-1 mt-1 ${selectedFrame === 'theme-cinema' ? 'border-amber-500/20 bg-stone-900/60 text-amber-400' : 'border-current/10 bg-white/20'}`}>
               {customText || "MOMENT STRIP"}
             </div>
 
             <div className={`w-full z-10 relative ${selectedLayout > 4 ? 'grid grid-cols-2 gap-1.5' : 'flex flex-col gap-1.5'}`}>
               {Array.from({ length: selectedLayout }).map((_, index) => (
-                <div 
-                  key={index} 
-                  className={`w-full aspect-[4/3] bg-stone-300/80 border flex items-center justify-center overflow-hidden relative shadow-inner shrink-0 rounded-sm group transition-all ${
-                    selectedSlot === index ? 'ring-4 ring-amber-500 border-amber-500 scale-95 z-30' : (selectedFrame === 'theme-cinema' ? 'border-amber-600/30' : 'border-current/20')
-                  }`}
-                >
+                <div key={index} className={`w-full aspect-[4/3] bg-stone-300/80 border flex items-center justify-center overflow-hidden relative shadow-inner rounded-sm group transition-all ${selectedSlot === index ? 'ring-4 ring-amber-500 border-amber-500 scale-95 z-30' : (selectedFrame === 'theme-cinema' ? 'border-amber-600/30' : 'border-current/20')}`}>
                   {capturedPhotos[index] ? (
                     <>
-                      <img 
-                        src={capturedPhotos[index].image} 
-                        alt={`Pose ${index + 1}`} 
-                        className="w-full h-full object-cover" 
-                      />
-                      
-                      {/* Menu Kontrol Interaktif (Retake & Tukar Posisi Letak Foto) saat Mouse Hover */}
+                      <img src={capturedPhotos[index].image} alt={`Pose ${index + 1}`} className="w-full h-full object-cover" />
                       <div className="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 flex items-center justify-center gap-1 transition-all duration-200 z-20">
-                        <button 
-                          onClick={() => setSelectedSlot(index)} 
-                          className="bg-amber-500 hover:bg-amber-600 text-stone-950 font-black text-[8px] px-1.5 py-0.5 rounded uppercase"
-                          title="Ambil ulang foto ini jika salah"
-                        >
-                          Retake
-                        </button>
-                        <button 
-                          onClick={() => movePhoto(index, -1)} 
-                          disabled={index === 0}
-                          className="bg-white hover:bg-stone-200 text-stone-900 font-bold text-[9px] w-5 h-5 rounded flex items-center justify-center disabled:opacity-30 disabled:pointer-events-none"
-                          title="Pindahkan ke atas"
-                        >
-                          ▲
-                        </button>
-                        <button 
-                          onClick={() => movePhoto(index, 1)} 
-                          disabled={index === capturedPhotos.length - 1}
-                          className="bg-white hover:bg-stone-200 text-stone-900 font-bold text-[9px] w-5 h-5 rounded flex items-center justify-center disabled:opacity-30 disabled:pointer-events-none"
-                          title="Pindahkan ke bawah"
-                        >
-                          ▼
-                        </button>
+                        <button onClick={() => setSelectedSlot(index)} className="bg-amber-500 hover:bg-amber-600 text-stone-950 font-black text-[8px] px-1.5 py-0.5 rounded uppercase">Retake</button>
+                        <button onClick={() => movePhoto(index, -1)} disabled={index === 0} className="bg-white hover:bg-stone-200 text-stone-900 font-bold text-[9px] w-5 h-5 rounded flex items-center justify-center disabled:opacity-30 disabled:pointer-events-none">▲</button>
+                        <button onClick={() => movePhoto(index, 1)} disabled={index === capturedPhotos.length - 1} className="bg-white hover:bg-stone-200 text-stone-900 font-bold text-[9px] w-5 h-5 rounded flex items-center justify-center disabled:opacity-30 disabled:pointer-events-none">▼</button>
                       </div>
                     </>
                   ) : (
-                    <button 
-                      onClick={() => setSelectedSlot(index)}
-                      className={`absolute inset-0 flex flex-col items-center justify-center text-[7px] font-bold tracking-widest transition-colors ${selectedFrame === 'theme-cinema' ? 'text-amber-200/40 bg-stone-900/50 hover:text-amber-300' : 'text-stone-500 bg-stone-200/50 hover:text-stone-800'}`}
-                    >
+                    <button onClick={() => setSelectedSlot(index)} className={`absolute inset-0 flex flex-col items-center justify-center text-[7px] font-bold tracking-widest transition-colors ${selectedFrame === 'theme-cinema' ? 'text-amber-200/40 bg-stone-900/50 hover:text-amber-300' : 'text-stone-500 bg-stone-200/50 hover:text-stone-800'}`}>
                       <span>KOSONG</span>
                       <span className="text-[6px] opacity-70 mt-0.5">(KLIK UTK EDIT)</span>
                     </button>
@@ -549,22 +652,12 @@ export default function PhotoBooth() {
               ))}
             </div>
 
-            <div className={`text-center text-[7px] font-bold opacity-70 mt-auto pt-0.5 w-full border-t z-10 relative pb-1 mb-1 rounded backdrop-blur-sm ${selectedFrame === 'theme-cinema' ? 'border-amber-500/20 bg-stone-900/60' : 'border-current/20 bg-white/20'}`}>
+            <div className={`text-center text-[7px] font-bold opacity-70 mt-auto pt-0.5 w-full border-t z-10 pb-1 mb-1 rounded backdrop-blur-sm ${selectedFrame === 'theme-cinema' ? 'border-amber-500/20 bg-stone-900/60' : 'border-current/20 bg-white/20'}`}>
               {new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
             </div>
 
             {stickers.map((sticker) => (
-              <div
-                key={sticker.id}
-                onClick={() => handleRemoveSticker(sticker.id)}
-                className="absolute text-xl md:text-2xl cursor-pointer hover:scale-125 transition-transform z-20 drop-shadow-md select-none"
-                style={{ 
-                  left: `${sticker.x}%`, 
-                  top: `${sticker.y}%`,
-                  transform: `rotate(${sticker.rotation}deg)` 
-                }}
-                title="Klik untuk menghapus"
-              >
+              <div key={sticker.id} onClick={() => handleRemoveSticker(sticker.id)} className="absolute text-xl md:text-2xl cursor-pointer hover:scale-125 transition-transform z-20 drop-shadow-md select-none" style={{ left: `${sticker.x}%`, top: `${sticker.y}%`, transform: `rotate(${sticker.rotation}deg)` }}>
                 {sticker.emoji}
               </div>
             ))}
